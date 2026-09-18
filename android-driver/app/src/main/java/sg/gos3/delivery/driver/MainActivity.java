@@ -102,12 +102,12 @@ public class MainActivity extends Activity {
                     .replace("\n", "")
                     .replace("\r", "");
                 webView.evaluateJavascript(
-                    "window.gos3OnBarcodeScanned && window.gos3OnBarcodeScanned('" + code + "')",
+                    "(function(){if(window.gos3OnBarcodeScanned){window.gos3OnBarcodeScanned('" + code + "');return;}var i=document.getElementById('manualCsn');var b=document.getElementById('useManual');if(i&&b){i.value='" + code + "';b.click();}})()",
                     null
                 );
             } else {
                 webView.evaluateJavascript(
-                    "window.gos3OnBarcodeScanCancelled && window.gos3OnBarcodeScanCancelled()",
+                    "(function(){if(window.gos3OnBarcodeScanCancelled){window.gos3OnBarcodeScanCancelled();return;}var s=document.getElementById('scanStatus');if(s)s.textContent='Scan cancelled. Try again or enter CSN manually.';})()",
                     null
                 );
             }
