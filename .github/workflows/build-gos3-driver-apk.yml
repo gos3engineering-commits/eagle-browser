@@ -29,7 +29,7 @@ jobs:
           unzip -q /tmp/gradle.zip -d /tmp
 
       - name: Build APK
-        run: /tmp/gradle-8.9/bin/gradle -p android-driver assembleDebug
+        run: /tmp/gradle-8.9/bin/gradle -p android-driver assembleDebug -Pandroid.useAndroidX=true -Pandroid.enableJetifier=true
 
       - name: Rename APK
         run: cp android-driver/app/build/outputs/apk/debug/app-debug.apk android-driver/app/build/outputs/apk/debug/GOS3-Driver.apk
