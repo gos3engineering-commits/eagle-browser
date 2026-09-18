@@ -145,6 +145,15 @@ public class MainActivity extends Activity {
                 .addOnSuccessListener(barcode -> {
                     String raw = barcode.getRawValue();
                     if (raw == null) raw = "";
+                    raw = raw.trim();
+                    if (raw.matches("\\d{6,}")) {
+                        Toast.makeText(
+                            MainActivity.this,
+                            "Raw QR data ignored. Please scan the actual CSN barcode.",
+                            Toast.LENGTH_LONG
+                        ).show();
+                        return;
+                    }
                     String code = raw
                         .replace("\\", "\\\\")
                         .replace("'", "\\'")
@@ -192,7 +201,7 @@ public class MainActivity extends Activity {
         s.setGeolocationEnabled(true);
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setUserAgentString(s.getUserAgentString() + " GOS3DriverAndroid/1.7");
+        s.setUserAgentString(s.getUserAgentString() + " GOS3DriverAndroid/1.8");
 
         webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
         webView.setWebViewClient(new WebViewClient() {
