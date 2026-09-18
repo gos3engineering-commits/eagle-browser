@@ -5,11 +5,16 @@ import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.webkit.GeolocationPermissions;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+
+import androidx.activity.result.ActivityResultLauncher;
+import com.journeyapps.barcodescanner.ScanContract;
+import com.journeyapps.barcodescanner.ScanOptions;
 
 public class MainActivity extends Activity {
     private static final int PERMISSION_REQUEST = 1001;
@@ -17,6 +22,44 @@ public class MainActivity extends Activity {
     private WebView webView;
     private GeolocationPermissions.Callback geoCallback;
     private String geoOrigin;
+
+    private final ActivityResultLauncher<ScanOptions> barcodeLauncher =
+        registerForActivityResult(new ScanContract(), result -> {
+            if (result.getContents() != null) {
+                String code = result.getContents()
+                    .replace("\\", "\\\\")
+                    .replace("'", "\\'")
+                    .replace("\n", "")
+                    .replace("\r", "");
+                webView.evaluateJavascript(
+                    "window.gos3OnBarcodeScanned && window.gos3OnBarcodeScanned('" + code + "')",
+                    null
+                );
+            } else {
+                webView.evaluateJavascript(
+                    "window.gos3OnBarcodeScanCancelled && window.gos3OnBarcodeScanCancelled()",
+                    null
+                );
+            }
+        });
+
+    public class AndroidBridge {
+        @JavascriptInterface
+        public void scanBarcode() {
+            runOnUiThread(() -> {
+                if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{Manifest.permission.CAMERA}, PERMISSION_REQUEST);
+                    return;
+                }
+                ScanOptions options = new ScanOptions();
+                options.setPrompt("Scan parcel QR code / CSN barcode");
+                options.setBeepEnabled(true);
+                options.setOrientationLocked(false);
+                options.setBarcodeImageEnabled(false);
+                barcodeLauncher.launch(options);
+            });
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -30,8 +73,9 @@ public class MainActivity extends Activity {
         s.setGeolocationEnabled(true);
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setUserAgentString(s.getUserAgentString() + " GOS3DriverAndroid/1.1");
+        s.setUserAgentString(s.getUserAgentString() + " GOS3DriverAndroid/1.2");
 
+        webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
         webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
