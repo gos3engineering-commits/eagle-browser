@@ -54,10 +54,34 @@ public class MainActivity extends Activity {
         s.setGeolocationEnabled(true);
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setUserAgentString(s.getUserAgentString() + " GOS3DriverAndroid/1.2");
+        s.setUserAgentString(s.getUserAgentString() + " GOS3DriverAndroid/1.3");
 
         webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                String js = "(function(){"
+                    + "if(window.__gos3NativeScannerInstalled)return;"
+                    + "window.__gos3NativeScannerInstalled=true;"
+                    + "function patch(){"
+                    + "if(window.Html5Qrcode&&window.Html5Qrcode.prototype&&!window.__gos3Html5Patched){"
+                    + "window.__gos3Html5Patched=true;"
+                    + "window.Html5Qrcode.prototype.start=function(){return Promise.resolve();};"
+                    + "window.Html5Qrcode.prototype.stop=function(){return Promise.resolve();};"
+                    + "window.Html5Qrcode.prototype.clear=function(){};"
+                    + "}"
+                    + "}"
+                    + "patch();"
+                    + "var active=false;"
+                    + "new MutationObserver(function(){patch();var input=document.getElementById('manualCsn');"
+                    + "if(input&&!active){active=true;setTimeout(function(){if(window.AndroidBridge)AndroidBridge.scanBarcode();},150);}"
+                    + "if(!input)active=false;"
+                    + "}).observe(document.documentElement,{childList:true,subtree:true});"
+                    + "})();";
+                view.evaluateJavascript(js, null);
+            }
+        });
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public void onPermissionRequest(final PermissionRequest request) {
