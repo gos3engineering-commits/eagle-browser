@@ -2,9 +2,9 @@ package sg.gos3.delivery.driver;
 
 import android.Manifest;
 import android.app.Activity;
-import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.widget.Toast;
 import android.webkit.GeolocationPermissions;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
@@ -12,8 +12,11 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import com.google.zxing.integration.android.IntentIntegrator;
-import com.google.zxing.integration.android.IntentResult;
+import com.google.android.gms.tasks.Task;
+import com.google.mlkit.vision.barcode.common.Barcode;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 
 public class MainActivity extends Activity {
     private static final int CAMERA_PERMISSION_REQUEST = 1001;
@@ -23,7 +26,7 @@ public class MainActivity extends Activity {
     private WebView webView;
     private GeolocationPermissions.Callback geoCallback;
     private String geoOrigin;
-    private boolean pendingScan = false;
+    private boolean pendingPhotoCameraPermission = false;
 
     private static final String SCANNER_PATCH =
         "(function(){"+
@@ -50,26 +53,75 @@ public class MainActivity extends Activity {
     public class AndroidBridge {
         @JavascriptInterface
         public void scanBarcode() {
-            runOnUiThread(() -> {
-                pendingScan = true;
-                if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-                    requestPermissions(new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST);
-                    return;
-                }
-                launchScanner();
-            });
+            runOnUiThread(() -> launchGoogleScanner());
         }
     }
 
-    private void launchScanner() {
-        pendingScan = false;
-        IntentIntegrator integrator = new IntentIntegrator(MainActivity.this);
-        integrator.setPrompt("Scan parcel QR code / CSN barcode");
-        integrator.setBeepEnabled(true);
-        integrator.setOrientationLocked(false);
-        integrator.setBarcodeImageEnabled(false);
-        integrator.setDesiredBarcodeFormats(IntentIntegrator.ALL_CODE_TYPES);
-        integrator.initiateScan();
+    private void launchGoogleScanner() {
+        try {
+            GmsBarcodeScannerOptions options =
+                new GmsBarcodeScannerOptions.Builder()
+                    .setBarcodeFormats(
+                        Barcode.FORMAT_QR_CODE,
+                        Barcode.FORMAT_CODE_128,
+                        Barcode.FORMAT_CODE_39,
+                        Barcode.FORMAT_CODE_93,
+                        Barcode.FORMAT_CODABAR,
+                        Barcode.FORMAT_EAN_13,
+                        Barcode.FORMAT_EAN_8,
+                        Barcode.FORMAT_ITF,
+                        Barcode.FORMAT_UPC_A,
+                        Barcode.FORMAT_UPC_E,
+                        Barcode.FORMAT_DATA_MATRIX,
+                        Barcode.FORMAT_PDF417,
+                        Barcode.FORMAT_AZTEC
+                    )
+                    .enableAutoZoom()
+                    .build();
+
+            GmsBarcodeScanner scanner = GmsBarcodeScanning.getClient(this, options);
+            scanner.startScan()
+                .addOnSuccessListener(barcode -> {
+                    String raw = barcode.getRawValue();
+                    if (raw == null) raw = "";
+                    String code = raw
+                        .replace("\\", "\\\\")
+                        .replace("'", "\\'")
+                        .replace("\n", "")
+                        .replace("\r", "");
+                    webView.evaluateJavascript(
+                        "window.gos3NativeScanResult && window.gos3NativeScanResult('" + code + "')",
+                        null
+                    );
+                })
+                .addOnCanceledListener(() -> {
+                    webView.evaluateJavascript(
+                        "window.gos3NativeScanCancelled && window.gos3NativeScanCancelled()",
+                        null
+                    );
+                })
+                .addOnFailureListener(e -> {
+                    Toast.makeText(
+                        MainActivity.this,
+                        "Scanner error: " + (e.getMessage() == null ? "Unable to open scanner" : e.getMessage()),
+                        Toast.LENGTH_LONG
+                    ).show();
+                    webView.evaluateJavascript(
+                        "window.gos3NativeScanCancelled && window.gos3NativeScanCancelled()",
+                        null
+                    );
+                });
+        } catch (Throwable e) {
+            Toast.makeText(
+                this,
+                "Unable to start scanner: " + e.getClass().getSimpleName(),
+                Toast.LENGTH_LONG
+            ).show();
+            webView.evaluateJavascript(
+                "window.gos3NativeScanCancelled && window.gos3NativeScanCancelled()",
+                null
+            );
+        }
     }
 
     @Override
@@ -85,7 +137,7 @@ public class MainActivity extends Activity {
         s.setGeolocationEnabled(true);
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setUserAgentString(s.getUserAgentString() + " GOS3DriverAndroid/1.4");
+        s.setUserAgentString(s.getUserAgentString() + " GOS3DriverAndroid/1.5");
 
         webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
         webView.setWebViewClient(new WebViewClient() {
@@ -100,6 +152,23 @@ public class MainActivity extends Activity {
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
+            public void onPermissionRequest(final android.webkit.PermissionRequest request) {
+                runOnUiThread(() -> {
+                    if (checkSelfPermission(Manifest.permission.CAMERA)
+                            == PackageManager.PERMISSION_GRANTED) {
+                        request.grant(request.getResources());
+                    } else {
+                        pendingPhotoCameraPermission = true;
+                        request.deny();
+                        requestPermissions(
+                            new String[]{Manifest.permission.CAMERA},
+                            CAMERA_PERMISSION_REQUEST
+                        );
+                    }
+                });
+            }
+
+            @Override
             public void onGeolocationPermissionsShowPrompt(
                     String origin,
                     GeolocationPermissions.Callback callback) {
@@ -110,11 +179,11 @@ public class MainActivity extends Activity {
                     geoOrigin = origin;
                     geoCallback = callback;
                     requestPermissions(
-                            new String[]{
-                                    Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION
-                            },
-                            LOCATION_PERMISSION_REQUEST
+                        new String[]{
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        },
+                        LOCATION_PERMISSION_REQUEST
                     );
                 }
             }
@@ -128,31 +197,6 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        IntentResult result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
-        if (result != null) {
-            if (result.getContents() != null) {
-                String code = result.getContents()
-                        .replace("\\", "\\\\")
-                        .replace("'", "\\'")
-                        .replace("\n", "")
-                        .replace("\r", "");
-                webView.evaluateJavascript(
-                        "window.gos3NativeScanResult && window.gos3NativeScanResult('" + code + "')",
-                        null
-                );
-            } else {
-                webView.evaluateJavascript(
-                        "window.gos3NativeScanCancelled && window.gos3NativeScanCancelled()",
-                        null
-                );
-            }
-            return;
-        }
-        super.onActivityResult(requestCode, resultCode, data);
-    }
-
-    @Override
     public void onRequestPermissionsResult(
             int requestCode,
             String[] permissions,
@@ -160,15 +204,13 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
 
         if (requestCode == CAMERA_PERMISSION_REQUEST) {
-            if (checkSelfPermission(Manifest.permission.CAMERA)
-                    == PackageManager.PERMISSION_GRANTED && pendingScan) {
-                launchScanner();
-            } else {
-                pendingScan = false;
-                webView.evaluateJavascript(
-                        "alert('Camera permission is required to scan parcel QR / CSN barcodes.')",
-                        null
-                );
+            if (pendingPhotoCameraPermission) {
+                pendingPhotoCameraPermission = false;
+                Toast.makeText(
+                    this,
+                    "Camera permission granted. Tap Take Photo again.",
+                    Toast.LENGTH_SHORT
+                ).show();
             }
             return;
         }
