@@ -2,6 +2,7 @@ package sg.gos3.delivery.driver;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.webkit.GeolocationPermissions;
@@ -12,9 +13,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import androidx.activity.result.ActivityResultLauncher;
-import com.journeyapps.barcodescanner.ScanContract;
-import com.journeyapps.barcodescanner.ScanOptions;
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
 
 public class MainActivity extends Activity {
     private static final int PERMISSION_REQUEST = 1001;
@@ -22,26 +22,6 @@ public class MainActivity extends Activity {
     private WebView webView;
     private GeolocationPermissions.Callback geoCallback;
     private String geoOrigin;
-
-    private final ActivityResultLauncher<ScanOptions> barcodeLauncher =
-        registerForActivityResult(new ScanContract(), result -> {
-            if (result.getContents() != null) {
-                String code = result.getContents()
-                    .replace("\\", "\\\\")
-                    .replace("'", "\\'")
-                    .replace("\n", "")
-                    .replace("\r", "");
-                webView.evaluateJavascript(
-                    "window.gos3OnBarcodeScanned && window.gos3OnBarcodeScanned('" + code + "')",
-                    null
-                );
-            } else {
-                webView.evaluateJavascript(
-                    "window.gos3OnBarcodeScanCancelled && window.gos3OnBarcodeScanCancelled()",
-                    null
-                );
-            }
-        });
 
     public class AndroidBridge {
         @JavascriptInterface
@@ -51,12 +31,13 @@ public class MainActivity extends Activity {
                     requestPermissions(new String[]{Manifest.permission.CAMERA}, PERMISSION_REQUEST);
                     return;
                 }
-                ScanOptions options = new ScanOptions();
-                options.setPrompt("Scan parcel QR code / CSN barcode");
-                options.setBeepEnabled(true);
-                options.setOrientationLocked(false);
-                options.setBarcodeImageEnabled(false);
-                barcodeLauncher.launch(options);
+                IntentIntegrator integrator = new IntentIntegrator(MainActivity.this);
+                integrator.setPrompt("Scan parcel QR code / CSN barcode");
+                integrator.setBeepEnabled(true);
+                integrator.setOrientationLocked(false);
+                integrator.setBarcodeImageEnabled(false);
+                integrator.setDesiredBarcodeFormats(IntentIntegrator.ALL_CODE_TYPES);
+                integrator.initiateScan();
             });
         }
     }
@@ -108,6 +89,31 @@ public class MainActivity extends Activity {
         }
 
         if (savedInstanceState == null) webView.loadUrl(DRIVER_URL); else webView.restoreState(savedInstanceState);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        IntentResult result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+        if (result != null) {
+            if (result.getContents() != null) {
+                String code = result.getContents()
+                    .replace("\\", "\\\\")
+                    .replace("'", "\\'")
+                    .replace("\n", "")
+                    .replace("\r", "");
+                webView.evaluateJavascript(
+                    "window.gos3OnBarcodeScanned && window.gos3OnBarcodeScanned('" + code + "')",
+                    null
+                );
+            } else {
+                webView.evaluateJavascript(
+                    "window.gos3OnBarcodeScanCancelled && window.gos3OnBarcodeScanCancelled()",
+                    null
+                );
+            }
+            return;
+        }
+        super.onActivityResult(requestCode, resultCode, data);
     }
 
     @Override
